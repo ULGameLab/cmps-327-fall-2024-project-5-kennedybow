@@ -1,217 +1,198 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using System;
 using MapGen;
 
-//FSM States for the Player
-public enum PlayerState {DEFAULT, MOVING, EVADE, GOAL_REACHED, DEAD };
-
-public class Player : MonoBehaviour
+namespace Pathfinding
 {
-    PathFinder pathFinder;
-    public GenerateMap mapGenerator;
-    public Queue<Tile> path;
-    public Tile currentTile;
-    public Tile targetTile;
-    Vector3 velocity;
-
-    //properties
-    public float slowSpeed = 1.0f;
-    public float fastSpeed = 2.0f;
-    float speed = 1.0f;
-    int enemyCloseCounter = 0;
-    public int maxCounter = 5;
-    public float visionDistance = 4;
-    Material material;
-    Color playerColor;
-
-    PlayerState state = PlayerState.DEFAULT;
-
-    //environment
-    List<Enemy> enemyList;
-    Enemy closestEnemy;
-
-    //Explosion Effect
-    ParticleSystem explosion;
-    bool explosionStarted = false;
-
-    // Start is called before the first frame update
-    void Start()
+    public class Node
     {
-        path = new Queue<Tile>();
-        pathFinder = new PathFinder();
-        enemyList = new List<Enemy>((Enemy[]) GameObject.FindObjectsByType(typeof(Enemy), FindObjectsSortMode.None));
-        material = GetComponent<MeshRenderer>().material;
-        playerColor = material.color;
-        currentTile = mapGenerator.start;
-        explosion = GameObject.Find("Explosion").GetComponent<ParticleSystem>();
-    }
+        public Node cameFrom = null; // Parent node
+        public double priority = 0; // F value
+        public double costSoFar = 0; // G Value
+        public Tile tile;
 
-    // Update is called once per frame
-    void Update()
-    {
-        if (mapGenerator.state == MapState.DESTROYED) return;
-
-        HandlePlayerFSMStates();
-    }
-
-    public bool IsGoalReached()
-    {
-        if (state == PlayerState.GOAL_REACHED) return true;
-        else return false;
-    }
-
-    public bool IsPlayerDead()
-    {
-        if (state == PlayerState.DEAD) return true;
-        else return false;
-    }
-
-    private void HandlePlayerFSMStates()
-    {
-        switch(state)
+        public Node(Tile _tile, double _priority, Node _cameFrom, double _costSoFar)
         {
-            case PlayerState.DEFAULT: // Find Path to Goal
-                material.color = playerColor;
-                speed = slowSpeed;
+            cameFrom = _cameFrom;
+            priority = _priority;
+            costSoFar = _costSoFar;
+            tile = _tile;
+        }
+    }
 
-                if (path.Count <= 0) path = pathFinder.FindPathAStar(currentTile, mapGenerator.goal);
-                //if there is a path get next step then update target and go to moving state
-                if (path.Count > 0)
+    public class PathFinder
+    {
+        List<Node> TODOList = new List<Node>();
+        List<Node> DoneList = new List<Node>();
+        Tile goalTile;
+
+        // This is the constructor
+        public PathFinder()
+        {
+            goalTile = null;
+        }
+
+        // Find the path based on A-Star Algorithm
+        public Queue<Tile> FindPathAStar(Tile start, Tile goal)
+        {
+            TODOList = new List<Node>();
+            DoneList = new List<Node>();
+
+            TODOList.Add(new Node(start, 0, null, 0));
+            goalTile = goal;
+
+            while (TODOList.Count > 0)
+            {
+                TODOList.Sort((x, y) => (x.priority.CompareTo(y.priority))); // Sort TODO List based on the F cost
+                Node current = TODOList[0];
+                DoneList.Add(current);
+                TODOList.RemoveAt(0);
+
+                if (current.tile == goal)
                 {
-                    targetTile = path.Dequeue();
-                    state = PlayerState.MOVING;
+                    return RetracePath(current);  // Returns the path if goal is reached
                 }
-                break;
-            case PlayerState.EVADE: // if possible find path to goal evading enemies otherwise choose next target based on evade behavior
-                speed = fastSpeed;
-                material.color = Color.yellow;
 
-                if (path.Count <= 0)
+                foreach (Tile nextTile in current.tile.Adjacents)
                 {
-                    path = pathFinder.FindPathAStarEvadeEnemy(currentTile, mapGenerator.goal);
-                    enemyCloseCounter = 0;
-                }
+                    if (DoneList.Exists(n => n.tile == nextTile)) continue; // Skip if already evaluated
 
-                if (path.Count > 0) targetTile = path.Dequeue();
-                else targetTile = FindEvadeTile(closestEnemy.gameObject);
-                state = PlayerState.MOVING;
-                break;
-            case PlayerState.MOVING: //move to next target
-                //move
-                velocity = targetTile.transform.position - transform.position;
-                transform.position = transform.position + (velocity.normalized * speed)*Time.deltaTime;
-                
-                // Check if player  is dead
-                foreach (Enemy enemy in enemyList)
-                {
-                    if (Vector3.Distance(enemy.gameObject.transform.position, transform.position) < 0.5f)
+                    double newCost = current.costSoFar + 10; // Assuming cost to move to adjacent tile is 10
+                    Node nextNode = TODOList.Find(n => n.tile == nextTile);
+
+                    if (nextNode == null)
                     {
-                        state = PlayerState.DEAD;
+                        nextNode = new Node(nextTile, newCost + HeuristicsDistance(nextTile, goal), current, newCost);
+                        TODOList.Add(nextNode);
+                    }
+                    else if (newCost < nextNode.costSoFar)
+                    {
+                        nextNode.costSoFar = newCost;
+                        nextNode.priority = newCost + HeuristicsDistance(nextTile, goal);
+                        nextNode.cameFrom = current; // Update parent
                     }
                 }
+            }
+            return new Queue<Tile>(); // Returns an empty path if no path is found
+        }
 
-                //if target tile is reached
-                if (Vector3.Distance(transform.position, targetTile.transform.position) <= 0.05f)
+        public Queue<Tile> FindPathAStarEvadeEnemy(Tile start, Tile goal)
+        {
+            TODOList = new List<Node>();
+            DoneList = new List<Node>();
+
+            TODOList.Add(new Node(start, 0, null, 0));
+            goalTile = goal;
+
+            while (TODOList.Count > 0)
+            {
+                TODOList.Sort((x, y) => (x.priority.CompareTo(y.priority)));
+                Node current = TODOList[0];
+                DoneList.Add(current);
+                TODOList.RemoveAt(0);
+
+                if (current.tile == goal)
                 {
-                    //update current tile
-                    currentTile = targetTile;
-                    //decrease counter
-                    enemyCloseCounter--;
+                    return RetracePath(current);
+                }
 
-                    //if it goal change state to GOAL_REACHED
-                    if (currentTile == mapGenerator.goal)
+                foreach (Tile nextTile in current.tile.Adjacents)
+                {
+                    if (DoneList.Exists(n => n.tile == nextTile)) continue;
+
+                    double newCost = current.costSoFar + 10;
+                    Node nextNode = TODOList.Find(n => n.tile == nextTile);
+
+                    if (nextTile.IsEnemyTile())
                     {
-                        state = PlayerState.GOAL_REACHED;
-                        break;
+                        newCost += 30; // Increase cost for enemy tiles
                     }
 
-                    //if counter is less than zero, check for close enemies
-                    if (enemyCloseCounter <= 0)
+                    if (nextNode == null)
                     {
-                        foreach (Enemy enemy in enemyList)
+                        nextNode = new Node(nextTile, newCost + HeuristicsDistance(nextTile, goal), current, newCost);
+                        TODOList.Add(nextNode);
+                    }
+                    else if (newCost < nextNode.costSoFar)
+                    {
+                        nextNode.costSoFar = newCost;
+                        nextNode.priority = newCost + HeuristicsDistance(nextTile, goal);
+                        nextNode.cameFrom = current;
+                    }
+                }
+            }
+            return new Queue<Tile>(); // Returns an empty path if no path is found
+        }
+
+        double HeuristicsDistance(Tile currentTile, Tile goalTile)
+        {
+            int xdist = Math.Abs(goalTile.indexX - currentTile.indexX);
+            int ydist = Math.Abs(goalTile.indexY - currentTile.indexY);
+            return (xdist * 10 + ydist * 10);
+        }
+
+        Queue<Tile> RetracePath(Node node)
+        {
+            List<Tile> tileList = new List<Tile>();
+            Node nodeIterator = node;
+            while (nodeIterator.cameFrom != null)
+            {
+                tileList.Insert(0, nodeIterator.tile);
+                nodeIterator = nodeIterator.cameFrom;
+            }
+            return new Queue<Tile>(tileList);
+        }
+
+        public Queue<Tile> RandomPath(Tile start, int stepNumber)
+        {
+            List<Tile> tileList = new List<Tile>();
+            Tile currentTile = start;
+            for (int i = 0; i < stepNumber; i++)
+            {
+                Tile nextTile;
+                if (currentTile.Adjacents.Count < 0)
+                {
+                    break;
+                }
+                else if (currentTile.Adjacents.Count == 1)
+                {
+                    nextTile = currentTile.Adjacents[0];
+                }
+                else
+                {
+                    nextTile = null;
+                    List<Tile> adjacentList = new List<Tile>(currentTile.Adjacents);
+                    ShuffleTiles<Tile>(adjacentList);
+                    if (tileList.Count <= 0) nextTile = adjacentList[0];
+                    else
+                    {
+                        foreach (Tile tile in adjacentList)
                         {
-                            if (Vector3.Distance(enemy.gameObject.transform.position, transform.position) < visionDistance)
+                            if (tile != tileList[tileList.Count - 1])
                             {
-                                closestEnemy = enemy;
-                                path.Clear();
-                                //if an enemy is close reset counter
-                                enemyCloseCounter = maxCounter;
+                                nextTile = tile;
                                 break;
-
                             }
                         }
                     }
-                    //if counter is over 0, got to evade
-                    if (enemyCloseCounter > 0) state = PlayerState.EVADE;
-                    else state = PlayerState.DEFAULT;
                 }
-                break;
-            case PlayerState.GOAL_REACHED:
-                material.color = playerColor;
-                break;
-            case PlayerState.DEAD:
-                Debug.Log("Player Dead");
-                transform.gameObject.GetComponent<Renderer>().enabled = false;
-                StartExplosion();
-                break;
-            default:
-                state = PlayerState.DEFAULT;
-                break;
+                tileList.Add(currentTile);
+                currentTile = nextTile;
+            }
+            return new Queue<Tile>(tileList);
         }
-    }
 
-    // Find a tile to evade from an incomming enemy
-    // Lookahead time is a fixed value but could be estimated as well
-    private Tile FindEvadeTile(GameObject enemy)
-    {
-        Tile nextTile = null;
-        //Debug.Log("Finding Evade Tile");
-
-        //Predict target location
-        Vector3 targetVelocity = enemy.GetComponent<Enemy>().velocity;
-        float lookaheadTime = 100;
-        Vector3 targetPredictedPosition = enemy.transform.position + targetVelocity * lookaheadTime;
-
-        //Evade from the target: FInd tile in opposite direction
-        double maxangle = 0;
-        foreach(Tile adjacent in currentTile.Adjacents)
+        private void ShuffleTiles<T>(List<T> list)
         {
-            Vector3 adjacentDirection = adjacent.transform.position - transform.position;
-            Vector3 targetDirection = targetPredictedPosition - transform.position;
-            double angle = Mathf.Acos(Vector3.Dot(adjacentDirection.normalized,targetDirection.normalized));
-            if(angle > maxangle)
+            for (int t = 0; t < list.Count; t++)
             {
-                nextTile = adjacent;
-                maxangle = angle;
+                T tmp = list[t];
+                int r = UnityEngine.Random.Range(t, list.Count);
+                list[t] = list[r];
+                list[r] = tmp;
             }
         }
-        return nextTile;
-    }
-
-    private void StartExplosion()
-    {
-        if(explosionStarted == false)
-        {
-            explosion.Play();
-            explosionStarted = true;
-        }
-        
-    }
-    private void StopExplosion()
-    {
-        explosionStarted = false;
-        explosion.Stop(true,ParticleSystemStopBehavior.StopEmittingAndClear);
-    }
-
-   
-    public void Reset(Tile tile)
-    {
-        Debug.Log("Player reset");
-        path.Clear();
-        transform.gameObject.GetComponent<Renderer>().enabled = true;
-        StopExplosion();
-        state = PlayerState.DEFAULT;
-        currentTile = tile;
     }
 }

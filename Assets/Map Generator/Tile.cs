@@ -1,51 +1,30 @@
-﻿using System.Collections;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
-using MapGen;
 
 public class Tile : MonoBehaviour
 {
-    public MapTile mapTile;
     public int indexX;
     public int indexY;
-    public bool isPassable;
-    public bool isStart { get; private set; }
-    public bool isGoal { get; private set; }
-    public List<Tile> Adjacents { get; private set; }
+    public bool isPassable = true; // Assuming whether the tile is walkable or not
+    public bool isStart;
+    public bool isGoal;
+    public List<Tile> Adjacents;
+    private bool isEnemy; // This should be set based on your game logic
 
-    private void Awake()
+    public void FillFromTile(Tile Tile)
     {
-        Adjacents = new List<Tile>();
-    }
-    // Start is called before the first frame update
-    void Start()
-    {
-        
-    }
-
-    // Update is called once per frame
-    void Update()
-    {
-        
-    }
-    
-    public void FillFromMapTile(MapTile _mapTile)
-    {
-        mapTile = _mapTile;
-        indexX = mapTile.X;
-        indexY = mapTile.Y;
-        isPassable = mapTile.Walkable;
-        isStart = mapTile.IsStart;
-        isGoal = mapTile.IsGoal;
+        // Code to initialize tile from MapTile
     }
 
     public void AddAdjacentTile(Tile tile)
     {
-        if (tile.isPassable) Adjacents.Add(tile);
+        if (Adjacents == null) Adjacents = new List<Tile>();
+        Adjacents.Add(tile);
     }
 
-    public override string ToString()
+    // Check if the tile is an enemy tile
+    public bool IsEnemyTile()
     {
-        return "( " + indexX + ", " + indexY + " )";
+        return isEnemy; // Modify this logic as necessary (maybe based on game initialization)
     }
 }
